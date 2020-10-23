@@ -1,0 +1,18 @@
+由于Bitmap的特殊性以及Android对单个应用所施加的内存限制，比如16MB，这导致加载Bitmap的时候很容易出现内存溢出
+
+```
+java.lang.OutofMemoryError: bitmap size exceeds VM budget
+```
+
+### Bitmpa的高效加载
+
+如何加载一个Bitmap呢，可以是png或者jpg等其他常见格式，BitmapFactory类提供了四类方法:decodeFile,decodeResouce,decodeStream和decodeByteArray,分别用于支持从文件系统，资源，输入流以及字节数组加载出一个Bitmap对象，其中decodeFile和decodeResource又间接调用了decodeStream方法，这四类方法最终是在Android底层实现的，对应着BitmapFactory类的几个native方法。
+
+采用BitmapFactory.Options来加载所需尺寸的图片，通过BitmapFactory.Options就可以按一定的采样率来加载缩小后的图片，这样就会降低内存占用从而一定程度上避免OOM，提高了Bitmap加载时的性能。
+
+通过BitmapFactory.Options来缩放图片，主要是用到了它的inSampleSize参数，即采样率。当inSampleSize为1时，采样后的图片大小为图片的原始大小；当inSampleSize大于1时，比如为2，那么采样后的图片宽/高均为原图大小的1/2，而像素数为原图的1/4，其占有的内存大小也为原图的1/4
+
+比如ImageView大小是100 * 100像素，而图片的原始大小为200 * 200，那么只需将采样率inSampleSize设为2即可。但是如果图片大小为200 * 300呢？这个时候采样率还应该选择2，如果采样率为3，那么缩放后的图片大小就会小于ImageView所期望的大小，这样图片就会被拉伸从而导致模糊。
+
+1. 将BitmapFactory.Options的inJustDecodeBounds参数设为true并加载图片。
+2. 从BitmapFactory.Options中取出图片的原始宽高信息，它们对应于outWidth和outHeight参数
