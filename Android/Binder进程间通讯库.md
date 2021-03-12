@@ -129,6 +129,175 @@ class ProcessState : public virtual RefBase{
 
 进程中的ProcessState对象可以通过ProcessState类的静态成员函数self来获取。第一次调用self函数时，**Binder库就会为进程创建一个ProcessState对象，并且调用函数open来打开设备文件/dev/binder,接着又调用函数mmap将它映射到进程的地址空间，即请求Binder驱动程序为进程分配内核缓冲区**。设备文件/dev/binder映射到进程的地址空间后，得到的内核缓冲区的用户地址就保存在其成员变量mVMStart中。
 
+### Binder进程间通信实例
+
+包含一个Server进程和一个Client进程，其中Server进程实现了一个Service组件
+
+```shell
+~Andorid/external/binder
+----common
+	----IFregService.h
+	----IFregService.cpp
+----server
+	----FregService.cpp
+	----Android.mk
+----client
+	----FregClient.cpp
+	----Android.mk
+```
+
+```c++
+common/IFregService.h
+#ifndef IFREGSERVICE_H_
+#define IFREGSERVICE_H_
+
+#include <utils/RefBase.h>
+#include <binder/IInterface.h>
+#include <binder/Parcel.h>
+  
+#define FREG_SERVICE "chong.zhang.FregService"  //注册到ServiceManager的名称
+  
+using namespace android;
+
+class IFregService: public IInterface{ //定义硬件访问服务接口
+  public:
+  		virtual int32_t getVal() = 0;
+  		virtual void setVal()(int32_t val) = 0;
+};
+
+//实现了模板类成员函数BnInterfaceonTranscat
+class BnFregService: public BnInterface<IFregService>{ 
+  public:
+  		virtual status_t onTranscat(uint32_t code,const Parcel& data,Parcel* reply,uint32_t flags = 0);
+};
+
+#endif
+```
+
+```c++
+common/IFregService.cpp
+  #define LOG_TAG "IFregService"
+  
+  #include <utils/Log.h>
+  #include "IFregService.h"
+  
+  using namespace android;
+
+enum{
+  GET_VAL = IBinder::FIRST_CALL_TRANSCATION,
+ 	SET_VAL
+};
+
+class BpFregService: public BpInterface<IFregService>{
+  public:
+  		BpFregService(const sp<IBinder>& impl):BpInterface<IFregService>(impl){}
+  public:
+  		int32_t getVal(){
+        Parcel data;
+        data.writeInterfaceToken(IFregService::getInterfaceDescriptor())
+          
+        Parcel reply;
+        remote()->transact(GET_VAL,data,$reply);
+        
+        int32_t val = reply.readInt32();
+        
+        return val;
+      }
+  
+  		void setVal(int32_t val){
+        Parcel data;
+        data.writeInterfaceToken(IFregService::getInterfaceDescriptor());
+        data.writeInt32(val);
+        
+        Parcel reply;
+        remote() -> transact(SET_VAL,data,&reply);
+      }
+};
+
+status_t BnFregService::onTransact(uint32_t code,const Parcel& data,Parcel* reply,uint32_t flags){
+  switch(code){
+    case GET_VAL:{
+      int32_t val = getVal();
+      reply->writeInt32(val);
+      return NO_ERROR;
+    }
+      
+    case SET_VAL:{
+      int32_t val = data.readInt32();;
+      setVal(val);
+      
+      return NO_ERROR;
+    }
+  }
+  
+}
+
+
+```
+
+```c++
+/server/FregService.cpp
+#define LOG_TAG "FregServer"
+
+#include <stdlib.h>
+  
+#include <binder/IServiceManager.h>
+#include <binder/IPCThreadState.h>
+  
+#include "../common/IFregService.h"
+  
+class FregService : public BnFregService{
+  public: 
+  		FregService(){
+        fd = open(FREG_DEVICE_NAME, O_RDWR);
+        if(fd == -1){
+          LOGE("Failed to open device %s.\n",FREG_DEVICE_NAME);
+        }
+      }
+  
+  		virtual ~FregService(){
+        		if(fd != -1){
+                 close(fd);
+            }
+      }
+  
+  public: 
+  		static void instantiate(){
+        defaultServiceManager()->addService(String16(FRGG_SERVICE),new FregService());
+      }
+  
+  		int32_t getVal(){
+        		int32_t val = 0;
+        		if(fd != -1){
+              		read(fd, &val, sizeof(val));
+            }
+        		return val;
+      }
+  
+  		void setVal(int32_t val){
+        if(fd != -1){
+          		write(fd,&val,sizeof(val));
+        }
+      }
+  
+  private:
+  		int fd;
+  
+};
+
+int main(int argc, char** argv){
+  	FregService::instantiate(); //将Service组件注册到ServiceManager
+  
+  	ProcessState::self()->startThreadPool(); //启动一个Binder线程池
+  	IPCThreadState::self()->joinThreadPool(); //将主线程添加到进程的Binder线程池中，用来处理来自Client进程的通信请求
+  
+  	return 0;
+}
+
+
+
+```
+
 
 
 
